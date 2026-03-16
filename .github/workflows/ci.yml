@@ -40,6 +40,17 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # Mission 3: Scan application dependencies
+      - name: Scan backend dependencies with Snyk
+        uses: snyk/actions/python-3.10@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: monitor
+          args: --file=requirements.txt --project-name=fleema-backend
+
       - name: Run tests with coverage
         run: |
           USE_SQLITE=True pytest -v --tb=short \
@@ -86,6 +97,17 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+
+      # Mission 3: Scan frontend dependencies with Snyk
+      - name: Scan frontend dependencies with Snyk
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: monitor
+          args: --file=package.json --project-name=fleema-frontend
+
       - run: npx vitest run --reporter=verbose
       - uses: actions/upload-artifact@v4
         if: always()
@@ -103,3 +125,37 @@ jobs:
         run: docker build -t fleema-backend:ci ./backend
       - name: Build frontend image
         run: docker build -t fleema-frontend:ci ./frontend
+
+      # Mission 1: Scan Docker images for vulnerabilities
+      - name: Scan backend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'fleema-backend:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Scan frontend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'fleema-frontend:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+  # ── Security Scans ─────────────────────────
+  # Mission 2: Scan Terraform infrastructure code
+  scan-infrastructure:
+    name: Scan Terraform Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan Terraform code
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: terraform/
+          exit_code: 1
