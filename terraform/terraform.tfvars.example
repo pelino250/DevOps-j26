@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────
+# FleeMa Terraform Variables - Example
+# Copy this file to terraform.tfvars and fill in your values
+# ─────────────────────────────────────────────
+# IMPORTANT: terraform.tfvars is gitignored for security
+# ─────────────────────────────────────────────
+
+# ── General Configuration ────────────────────
+aws_region   = "us-east-1"
+project_name = "fleema"
+environment  = "dev"
+
+# ── Security Configuration ───────────────────
+# REQUIRED: Your public IP address for SSH access
+# Find your IP: curl https://checkip.amazonaws.com
+# Format: xxx.xxx.xxx.xxx/32 (the /32 means single IP)
+your_ip_address = "YOUR.PUBLIC.IP.ADDRESS/32"
+
+# SSH key name (will be auto-generated)
+ssh_key_name = "fleema-dev-key"
+
+# ── Database Configuration ───────────────────
+# REQUIRED: Strong database password
+# Minimum 8 characters, include letters, numbers, symbols
+db_password = "CHANGE-ME-TO-STRONG-PASSWORD"
+
+# Optional: Customize database settings
+# db_name     = "fleema"
+# db_username = "fleema_admin"
+
+# ── Cost Optimization ────────────────────────
+# All defaults use free tier eligible resources
+# Uncomment to customize (may incur costs):
+
+# ec2_instance_type = "t3.small"     # More CPU/RAM (not free tier)
+# db_instance_class = "db.t3.small"  # More powerful DB (not free tier)
+# redis_node_type   = "cache.t3.small"  # Larger cache (not free tier)
+
+# ── Tags ─────────────────────────────────────
+# Optional: Add custom tags for resource organization
+# common_tags = {
+#   Project     = "FleeMa"
+#   Owner       = "Your Name"
+#   Environment = "dev"
+#   CostCenter  = "Learning"
+# }

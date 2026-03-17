@@ -1,0 +1,10 @@
+# Ansible sensitive files
+inventory.ini
+*.retry
+
+# Ansible vault password files
+.vault_pass
+vault_pass.txt
+
+# Environment-specific
+.env

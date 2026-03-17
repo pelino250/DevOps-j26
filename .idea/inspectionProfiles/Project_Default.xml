@@ -1,0 +1,21 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="Eslint" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="IncorrectHttpHeaderInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="customHeaders">
+        <set>
+          <option value="{" />
+          <option value="    &quot;name&quot;" />
+          <option value="    &quot;email&quot;" />
+          <option value="    &quot;phone&quot;" />
+          <option value="    &quot;address&quot;" />
+          <option value="}" />
+          <option value="    &quot;username&quot;" />
+          <option value="    &quot;password&quot;" />
+        </set>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="JSHint" enabled="true" level="ERROR" enabled_by_default="true" />
+  </profile>
+</component>

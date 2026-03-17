@@ -1,0 +1,23 @@
+# docker-compose.dev.yml — Override for local development
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    environment:
+      DJANGO_DEBUG: "True"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    command: npm run dev -- --host 0.0.0.0
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"

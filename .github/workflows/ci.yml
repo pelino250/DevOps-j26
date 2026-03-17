@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Backend ────────────────────────────────
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests with coverage
+        run: |
+          USE_SQLITE=True pytest -v --tb=short \
+            --junitxml=test-results.xml \
+            --cov=. --cov-report=xml --cov-report=term-missing
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: |
+            backend/test-results.xml
+            backend/coverage.xml
+
+  # ── Frontend ───────────────────────────────
+  frontend-lint:
+    name: Frontend Lint + Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b --noEmit
+
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx vitest run --reporter=verbose
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-test-results
+          path: frontend/test-results.xml
+
+  # ── Docker ─────────────────────────────────
+  docker-build:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t fleema-backend:ci ./backend
+      - name: Build frontend image
+        run: docker build -t fleema-frontend:ci ./frontend
+      # ADD THIS NEW STEP
+      - name: Scan Docker image for vulnerabilities in backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "fleema-backend:ci" # Must match the tag from your build step
+          format: "table"
+          exit-code: "1" # This is crucial! It fails the step if issues are found.
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH" # Only fail for Critical or High issues
+      # ADD THIS NEW STEP
+      - name: Scan Docker image for vulnerabilities in frontend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "fleema-frontend:ci" # Must match the tag from your build step
+          format: "table"
+          exit-code: "1" # This is crucial! It fails the step if issues are found.
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH" # Only fail for Critical or High issues
+

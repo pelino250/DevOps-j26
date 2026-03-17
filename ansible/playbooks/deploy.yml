@@ -1,0 +1,239 @@
+---
+# ─────────────────────────────────────────────
+# FleeMa Application Deployment Playbook
+# Deploy or update FleeMa application
+# ─────────────────────────────────────────────
+# Usage: ansible-playbook playbooks/deploy.yml \
+#          --extra-vars "db_password=YOUR_DB_PASSWORD github_username=YOUR_USERNAME"
+# ─────────────────────────────────────────────
+
+- name: Deploy FleeMa Application
+  hosts: fleema_app
+  become: yes
+  vars_files:
+    - ../vars.yml
+
+  tasks:
+    # ── Pre-deployment Checks ──────────────────
+    - name: Check if Docker is running
+      command: docker info
+      register: docker_info
+      failed_when: docker_info.rc != 0
+      changed_when: false
+
+    - name: Verify required variables are set
+      assert:
+        that:
+          - db_password is defined
+          - github_username is defined
+        fail_msg: "Missing required variables. Run with: --extra-vars 'db_password=XXX github_username=XXX'"
+
+    # ── Pull Latest Images ─────────────────────
+    - name: Log in to GitHub Container Registry
+      docker_login:
+        registry: ghcr.io
+        username: "{{ github_username }}"
+        password: "{{ github_token | default(lookup('env', 'GITHUB_TOKEN')) }}"
+      when: github_token is defined or lookup('env', 'GITHUB_TOKEN') != ''
+      ignore_errors: yes  # Public images don't require auth
+
+    - name: Pull backend image
+      docker_image:
+        name: "{{ backend_image }}"
+        tag: "{{ image_tag }}"
+        source: pull
+
+    - name: Pull frontend image
+      docker_image:
+        name: "{{ frontend_image }}"
+        tag: "{{ image_tag }}"
+        source: pull
+
+    # ── Create Docker Network ──────────────────
+    - name: Create Docker network
+      docker_network:
+        name: "{{ docker_network }}"
+        state: present
+
+    # ── Deploy Database Container ──────────────
+    # Note: In production, use RDS. This is for local testing only.
+    - name: Deploy PostgreSQL container (dev only)
+      docker_container:
+        name: "{{ postgres_container }}"
+        image: postgres:16-alpine
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ docker_network }}"
+        env:
+          POSTGRES_DB: "{{ db_name }}"
+          POSTGRES_USER: "{{ db_username }}"
+          POSTGRES_PASSWORD: "{{ db_password }}"
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+      when: environment == 'dev' and use_local_db | default(false)
+
+    # ── Deploy Redis Container ─────────────────
+    # Note: In production, use ElastiCache. This is for local testing only.
+    - name: Deploy Redis container (dev only)
+      docker_container:
+        name: "{{ redis_container }}"
+        image: redis:7-alpine
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ docker_network }}"
+      when: environment == 'dev' and use_local_redis | default(false)
+
+    # ── Deploy Backend Container ───────────────
+    - name: Deploy backend container
+      docker_container:
+        name: "{{ backend_container }}"
+        image: "{{ backend_image }}:{{ image_tag }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ docker_network }}"
+        env:
+          SECRET_KEY: "{{ django_secret_key | default(lookup('password', '/dev/null length=50 chars=ascii_letters,digits')) }}"
+          DEBUG: "{{ 'True' if app_environment == 'dev' else 'False' }}"
+          ALLOWED_HOSTS: "*"
+          POSTGRES_HOST: "{{ db_host }}"
+          POSTGRES_PORT: "{{ db_port | string }}"
+          POSTGRES_DB: "{{ db_name }}"
+          POSTGRES_USER: "{{ db_username }}"
+          POSTGRES_PASSWORD: "{{ db_password }}"
+          REDIS_URL: "redis://{{ redis_host }}:{{ redis_port | string }}/0"
+        ports:
+          - "8000:8000"
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 40s
+
+    # ── Run Database Migrations ────────────────
+    - name: Wait for backend to be healthy
+      wait_for:
+        host: localhost
+        port: 8000
+        delay: 10
+        timeout: 60
+
+    - name: Run database migrations
+      command: docker exec {{ backend_container }} python manage.py migrate --noinput
+      register: migration_result
+      changed_when: "'No migrations to apply' not in migration_result.stdout"
+
+    - name: Display migration output
+      debug:
+        msg: "{{ migration_result.stdout_lines }}"
+
+    # ── Deploy Frontend Container ──────────────
+    - name: Deploy frontend container
+      docker_container:
+        name: "{{ frontend_container }}"
+        image: "{{ frontend_image }}:{{ image_tag }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ docker_network }}"
+        ports:
+          - "3000:80"
+
+    # ── Deploy Nginx Reverse Proxy ─────────────
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create Nginx configuration
+      copy:
+        dest: "{{ app_dir }}/nginx.conf"
+        content: |
+          upstream backend {
+              server {{ backend_container }}:8000;
+          }
+          upstream frontend {
+              server {{ frontend_container }}:80;
+          }
+          server {
+              listen 80;
+              server_name _;
+              client_max_body_size 10M;
+
+              location /api/ {
+                  proxy_pass http://backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /admin/ {
+                  proxy_pass http://backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+
+              location /static/ {
+                  proxy_pass http://backend;
+              }
+
+              location / {
+                  proxy_pass http://frontend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+          }
+        mode: '0644'
+
+    - name: Deploy Nginx container
+      docker_container:
+        name: "{{ nginx_container }}"
+        image: nginx:1.27-alpine
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ docker_network }}"
+        ports:
+          - "80:80"
+        volumes:
+          - "{{ app_dir }}/nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+
+    # ── Health Check ───────────────────────────
+    - name: Wait for application to be ready
+      uri:
+        url: "http://localhost/api/v1/"
+        status_code: [200, 401]  # 401 is expected for auth-required endpoints
+        timeout: 5
+      register: health_check
+      until: health_check.status in [200, 401]
+      retries: 12
+      delay: 5
+
+    # ── Deployment Summary ─────────────────────
+    - name: Get container status
+      shell: docker ps --filter "name=fleema" --format "table {% raw %}{{.Names}}\t{{.Status}}\t{{.Ports}}{% endraw %}"
+      register: container_status
+      changed_when: false
+
+    - name: Display deployment summary
+      debug:
+        msg: |
+          ✓ Deployment complete!
+
+          Running containers:
+          {{ container_status.stdout }}
+
+          Application URLs:
+          - Frontend: http://{{ ansible_host }}
+          - API: http://{{ ansible_host }}/api/v1/
+          - Admin: http://{{ ansible_host }}/admin/
+
+          Logs:
+          - Backend: docker logs {{ backend_container }}
+          - Frontend: docker logs {{ frontend_container }}
+          - Nginx: docker logs {{ nginx_container }}

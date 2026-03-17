@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────
+# Ansible Inventory - EXAMPLE
+# Copy this file to inventory.ini and fill in your values
+# ─────────────────────────────────────────────
+# IMPORTANT: inventory.ini is gitignored for security
+# Get values from: terraform output
+# ─────────────────────────────────────────────
+
+[fleema_app]
+# REPLACE with EC2 public IP from terraform output
+fleema-dev ansible_host=REPLACE_WITH_EC2_PUBLIC_IP
+
+[fleema_app:vars]
+# SSH connection settings
+ansible_user=ubuntu
+ansible_ssh_private_key_file=~/.ssh/fleema-dev-key.pem
+ansible_python_interpreter=/usr/bin/python3
+
+# Application settings
+app_name=fleema
+app_user=fleema
+app_dir=/home/fleema/app
+docker_compose_version=2.24.0
+
+# Database connection (REPLACE with values from terraform outputs)
+db_host=REPLACE_WITH_RDS_ENDPOINT
+db_port=5432
+db_name=fleema
+db_username=fleema_admin
+# Note: db_password should be passed via --extra-vars or encrypted with ansible-vault
+
+# Redis connection (REPLACE with values from terraform outputs)
+redis_host=REPLACE_WITH_REDIS_ENDPOINT
+redis_port=6379
+
+# Environment (using app_environment to avoid reserved name)
+app_environment=dev

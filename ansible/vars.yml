@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────
+# Ansible Variables
+# Centralized configuration for playbooks
+# ─────────────────────────────────────────────
+
+# ── Docker Configuration ─────────────────────
+docker_apt_gpg_key: "https://download.docker.com/linux/ubuntu/gpg"
+docker_apt_repository: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+docker_compose_url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-{{ ansible_system }}-{{ ansible_architecture }}"
+
+# ── Application Configuration ────────────────
+app_repository: "ghcr.io/{{ github_username }}/fleema"
+backend_image: "{{ app_repository }}-backend"
+frontend_image: "{{ app_repository }}-frontend"
+image_tag: "dev"  # Change to 'latest' for production or specific version
+app_dir: "/home/ubuntu/fleema"  # Application directory on EC2
+app_user: "fleema"  # Application user
+
+# ── Container Names ──────────────────────────
+backend_container: "fleema-backend"
+frontend_container: "fleema-frontend"
+postgres_container: "fleema-postgres"
+redis_container: "fleema-redis"
+nginx_container: "fleema-nginx"
+
+# ── Network Configuration ────────────────────
+docker_network: "fleema-network"
+
+# ── Firewall Configuration ───────────────────
+ufw_allowed_ports:
+  - "22"    # SSH
+  - "80"    # HTTP
+  - "443"   # HTTPS
+
+# ── Log Configuration ────────────────────────
+log_dir: "/var/log/fleema"
+log_rotation_days: 7

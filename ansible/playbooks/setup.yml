@@ -1,0 +1,182 @@
+---
+# ─────────────────────────────────────────────
+# FleeMa Server Setup Playbook
+# One-time setup: Install Docker, configure server
+# ─────────────────────────────────────────────
+# Usage: ansible-playbook playbooks/setup.yml
+# ─────────────────────────────────────────────
+
+- name: Setup FleeMa Application Server
+  hosts: fleema_app
+  become: yes
+  vars_files:
+    - ../vars.yml
+
+  tasks:
+    # ── System Update ──────────────────────────
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600  # Cache valid for 1 hour
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    # ── Install Prerequisites ──────────────────
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - python3-pip
+          - git
+          - ufw  # Firewall
+        state: present
+
+    # ── Install Docker ─────────────────────────
+    - name: Add Docker GPG key
+      apt_key:
+        url: "{{ docker_apt_gpg_key }}"
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "{{ docker_apt_repository }}"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # ── Install Docker Compose ─────────────────
+    - name: Download Docker Compose
+      get_url:
+        url: "{{ docker_compose_url }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Verify Docker Compose installation
+      command: docker-compose --version
+      register: compose_version
+      changed_when: false
+
+    - name: Display Docker Compose version
+      debug:
+        msg: "{{ compose_version.stdout }}"
+
+    # ── Create Application User ────────────────
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        shell: /bin/bash
+        create_home: yes
+        groups: docker  # Allow running Docker without sudo
+        append: yes
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+
+    - name: Create log directory
+      file:
+        path: "{{ log_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+
+    # ── Configure Firewall (UFW) ───────────────
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny  # Default deny all incoming
+
+    - name: Allow SSH (prevent lockout!)
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Allow HTTP
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Allow HTTPS
+      ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    # ── Install Python Docker Module ───────────
+    # Required for Ansible docker_* modules
+    - name: Install Python Docker module
+      pip:
+        name:
+          - docker
+          - docker-compose
+        state: present
+
+    # ── Configure Log Rotation ─────────────────
+    - name: Setup log rotation for application logs
+      copy:
+        dest: /etc/logrotate.d/fleema
+        content: |
+          {{ log_dir }}/*.log {
+              daily
+              rotate {{ log_rotation_days }}
+              compress
+              delaycompress
+              notifempty
+              create 0644 {{ app_user }} {{ app_user }}
+              sharedscripts
+          }
+        mode: '0644'
+
+    # ── System Tuning ──────────────────────────
+    - name: Increase file descriptor limits
+      pam_limits:
+        domain: "{{ app_user }}"
+        limit_type: "{{ item.limit_type }}"
+        limit_item: nofile
+        value: "{{ item.value }}"
+      loop:
+        - { limit_type: 'soft', value: '65536' }
+        - { limit_type: 'hard', value: '65536' }
+
+    # ── Final Setup ────────────────────────────
+    - name: Display setup completion message
+      debug:
+        msg: |
+          ✓ Server setup complete!
+
+          Installed:
+          - Docker {{ compose_version.stdout }}
+          - Application user: {{ app_user }}
+          - Application directory: {{ app_dir }}
+          - Firewall configured (ports: 22, 80, 443)
+
+          Next step: Run deploy.yml playbook to deploy FleeMa

@@ -1,0 +1,27 @@
+target-version = "py312"
+line-length = 120
+src = ["."]
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit
+    "RUF", # ruff-specific
+]
+ignore = [
+    "S101", # assert used (needed in tests)
+    "S106", # hardcoded password (test fixtures)
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101", "S106", "S107"]
+"**/migrations/**" = ["E501", "RUF012"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

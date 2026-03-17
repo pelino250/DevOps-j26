@@ -1,0 +1,77 @@
+name: CD – Deploy to Staging
+
+on:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: cd-staging
+  cancel-in-progress: false
+
+env:
+  DEPLOY_HOST: ${{ secrets.STAGING_HOST }}
+  DEPLOY_USER: ${{ secrets.STAGING_USER }}
+  DEPLOY_PATH: ${{ secrets.STAGING_PATH }}  # e.g. /opt/fleema
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    needs: []
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── SSH Setup ───────────────────────────
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # ── Deploy ──────────────────────────────
+      - name: Deploy via SSH + Docker Compose
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" bash -s <<'DEPLOY'
+            set -euo pipefail
+            cd "${{ secrets.STAGING_PATH }}"
+
+            # Pull latest code
+            git fetch origin develop
+            git reset --hard origin/develop
+
+            # Build and restart
+            docker compose build --pull
+            docker compose up -d --remove-orphans
+
+            # Run migrations
+            docker compose exec -T backend python manage.py migrate --noinput
+
+            echo "✅ Deployment complete: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          DEPLOY
+
+      # ── Smoke test ─────────────────────────
+      - name: Smoke test
+        run: |
+          sleep 10
+          STATUS=$(ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "curl -s -o /dev/null -w '%{http_code}' http://localhost/api/v1/auth/me/")
+          if [ "$STATUS" = "401" ]; then
+            echo "✅ API responding (401 = auth required, as expected)"
+          else
+            echo "❌ Unexpected status: $STATUS"
+            exit 1
+          fi
+
+      # ── Rollback instructions ───────────────
+      - name: Print rollback steps
+        if: failure()
+        run: |
+          echo "## 🔴 Rollback Instructions"
+          echo "SSH into \$DEPLOY_HOST and run:"
+          echo "  cd ${{ secrets.STAGING_PATH }}"
+          echo "  git log --oneline -5   # find last good commit"
+          echo "  git reset --hard <good-commit>"
+          echo "  docker compose build && docker compose up -d"
+          echo "  docker compose exec -T backend python manage.py migrate --noinput"
